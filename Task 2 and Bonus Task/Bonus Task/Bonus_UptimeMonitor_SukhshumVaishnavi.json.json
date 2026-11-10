@@ -1,0 +1,326 @@
+{
+  "name": "Bonus - Uptime Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "808a7d63-b67b-4400-bd50-1320bb50d20e",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "targetUrl",
+              "type": "string",
+              "value": "https://demo.realworld.show/"
+            },
+            {
+              "id": "c2",
+              "name": "startTime",
+              "type": "number",
+              "value": "={{Date.now()}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "59116ffc-4d84-4d8d-b0b9-6e998c4c9677",
+      "name": "Set: Target + Start Timer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.targetUrl}}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 8000
+        }
+      },
+      "id": "ff00b991-f736-43fa-84ef-22dd5c762754",
+      "name": "Ping Target App",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull the original URL + start timestamp back via node reference (avoids any Merge node).\nconst setNode = $('Set: Target + Start Timer').item.json;\nconst elapsedMs = Date.now() - setNode.startTime;\n\nconst resp = $json; // from Ping Target App (fullResponse shape, or {error:...} if it still threw)\nconst statusCode = resp.statusCode ?? resp.error?.statusCode ?? null;\nconst isUp = statusCode === 200;\n\n// Record this check into workflow static data for the daily summary.\nconst store = $getWorkflowStaticData('global');\nif (!store.checks) store.checks = [];\nstore.checks.push({\n  ts: Date.now(),\n  url: setNode.targetUrl,\n  statusCode,\n  elapsedMs,\n  up: isUp\n});\n// Keep only the last 24h to bound memory.\nconst cutoff = Date.now() - 24 * 60 * 60 * 1000;\nstore.checks = store.checks.filter(c => c.ts >= cutoff);\n\nreturn [{\n  json: {\n    url: setNode.targetUrl,\n    statusCode,\n    elapsedMs,\n    up: isUp,\n    retried: !!resp.error\n  }\n}];"
+      },
+      "id": "21baed15-6646-4a32-9ddb-471d5502c7d8",
+      "name": "Code: Record Check + Response Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{$json.up}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEqual"
+              }
+            },
+            {
+              "id": "ea9c69d1-f8fe-4f89-9289-541fc9007514",
+              "leftValue": "={{ $json.up }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "288a7a78-7dba-47dd-97e0-7e9b50a1f6dc",
+      "name": "IF: Status != 200?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "=={{`🚨 **Uptime Alert**\nApplication: ${$json.url}\nHTTP Status: ${$json.statusCode ?? 'No response / timeout'}\nResponse Time: ${$json.elapsedMs} ms\nRequest Error: ${$json.retried ? 'Yes — retry policy exhausted' : 'No — HTTP response was unsuccessful'}\nRetry Policy: Up to 3 attempts, 2 seconds apart\nTime: ${new Date().toISOString()}`}}",
+        "options": {}
+      },
+      "id": "08731196-9b92-4295-b17d-881f35072e3d",
+      "name": "Discord: Send Downtime Alert",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "webhookId": "df24aca3-98bf-4a31-8241-fc0eb9487637",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "RCupNHwYFx6qkUsA",
+          "name": "Discord Webhook account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "04cdda58-ec1e-4eeb-8d74-435175e7ee36",
+      "name": "No Action - App Healthy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "863ff6d3-d895-4488-ac30-0967741b9556",
+      "name": "Daily Summary - 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\nconst checks = store.checks || [];\n\nif (!checks.length) {\n  return [{ json: { summary: 'No checks recorded in the last 24h — monitor may not have run yet.' } }];\n}\n\nconst total = checks.length;\nconst upCount = checks.filter(c => c.up).length;\nconst downCount = total - upCount;\nconst uptimePct = ((upCount / total) * 100).toFixed(2);\nconst avgMs = Math.round(checks.reduce((s, c) => s + c.elapsedMs, 0) / total);\nconst maxMs = Math.max(...checks.map(c => c.elapsedMs));\nconst failures = checks.filter(c => !c.up).map(c => `• ${new Date(c.ts).toISOString()} — status ${c.statusCode ?? 'timeout'}`);\n\nconst summary = `📊 **Daily Uptime Summary**\\nChecks: ${total} | Up: ${upCount} | Down: ${downCount}\\nUptime: ${uptimePct}%\\nAvg response time: ${avgMs}ms | Max: ${maxMs}ms\\n` +\n  (failures.length ? `\\n**Failures:**\\n${failures.slice(0, 10).join('\\n')}${failures.length > 10 ? `\\n…and ${failures.length - 10} more` : ''}` : '\\nNo failures in the last 24h.');\n\nreturn [{ json: { summary } }];"
+      },
+      "id": "8b037f47-8202-4abc-856e-7466612d53d8",
+      "name": "Code: Build Daily Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{$json.summary}}",
+        "options": {}
+      },
+      "id": "adfbd548-3f6b-442d-9acd-4a3ce9f47df4",
+      "name": "Discord: Send Daily Summary",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "webhookId": "f42c50c0-7e8c-4708-a437-70912fa2294b",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "RCupNHwYFx6qkUsA",
+          "name": "Discord Webhook account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Set: Target + Start Timer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Target + Start Timer": {
+      "main": [
+        [
+          {
+            "node": "Ping Target App",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Target App": {
+      "main": [
+        [
+          {
+            "node": "Code: Record Check + Response Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Record Check + Response Time": {
+      "main": [
+        [
+          {
+            "node": "IF: Status != 200?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Status != 200?": {
+      "main": [
+        [
+          {
+            "node": "Discord: Send Downtime Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Action - App Healthy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Summary - 8am": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Daily Summary": {
+      "main": [
+        [
+          {
+            "node": "Discord: Send Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Asia/Kolkata",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "361a0554-4c0e-4709-a0b1-a499cbd9731c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "31f2f041daec45799562cce2d9aceae6da7e392ac4c00de98a89b988556351ba"
+  },
+  "nodeGroups": [],
+  "id": "rekxtd1P4xhOAyJ4",
+  "tags": []
+}

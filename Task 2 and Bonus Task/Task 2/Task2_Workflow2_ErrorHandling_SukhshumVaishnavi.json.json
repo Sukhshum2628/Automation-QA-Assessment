@@ -1,0 +1,65 @@
+{
+  "name": "Morning Brief - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "6337d79b-9a1e-44ef-824f-5193a331b119",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "=🚨 **Workflow failed** — {{$json.workflow?.name}}\\nNode: {{$json.execution?.lastNodeExecuted}}\\nError: {{$json.execution?.error?.message || 'see n8n execution log for details'}}\\nTime: {{new Date().toISOString()}}",
+        "options": {}
+      },
+      "id": "b61cec85-5a54-475a-bc0c-ca4c0ffabe8a",
+      "name": "Discord: Send Workflow-Level Error Alert",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        0
+      ],
+      "webhookId": "97b44b3c-b0f8-4602-9611-63e41f76b50b",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "RCupNHwYFx6qkUsA",
+          "name": "Discord Webhook account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Discord: Send Workflow-Level Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "018a3664-3472-41b7-8065-b1bd8a645e18",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "31f2f041daec45799562cce2d9aceae6da7e392ac4c00de98a89b988556351ba"
+  },
+  "nodeGroups": [],
+  "id": "LlJMKh6Njn01ea2M",
+  "tags": []
+}

@@ -1,0 +1,547 @@
+{
+  "name": "Morning Brief - GitHub Trending Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "31522d0a-a4de-4d94-82e8-2f357bbd9f4f",
+      "name": "Schedule Trigger (hourly - testing)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -32,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "morning-brief-trigger",
+        "options": {}
+      },
+      "id": "a590be70-d409-4c8e-b43c-43bd8a1c219e",
+      "name": "Webhook Trigger (manual test via curl)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        48
+      ],
+      "webhookId": "morning-brief-trigger"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=topic:machine-learning created:>{{$now.minus({days:7}).toFormat('yyyy-MM-dd')}}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "20"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "4d696cfd-1ee2-487d-ac92-02387692ada2",
+      "name": "HTTP1: Fetch GitHub Repos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        -48
+      ],
+      "continueOnFail": true,
+      "notes": "authentication is set to 'none' so this works unauthenticated against GitHub's public rate limit (60 req/hr/IP). To raise the limit, switch 'authentication' to 'genericCredentialType' / 'httpHeaderAuth' and attach a Personal Access Token credential named 'GitHub Token Header Auth' with header 'Authorization: Bearer <token>'. Do this on BOTH HTTP1 and HTTP2 consistently — don't authenticate one and not the other."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Guard: if the upstream call failed, forward a single error-marker item.\nif ($input.first().json.error) {\n  return [{ json: { error: $input.first().json.error, stage: 'fetch_repos' } }];\n}\n\nconst items = $input.first().json.items || [];\n\nconst top5 = items\n  .map(r => ({\n    name: r.full_name,\n    owner: r.owner.login,\n    repo: r.name,\n    stars: r.stargazers_count,\n    url: r.html_url,\n    description: r.description || 'No description provided.'\n  }))\n  .sort((a, b) => b.stars - a.stars)\n  .slice(0, 5);\n\n// Explicitly handle zero matching repos instead of letting the run go quiet.\nif (top5.length === 0) {\n  return [{ json: { error: 'No repositories matched the search query.', stage: 'transform_empty' } }];\n}\n\nreturn top5.map(item => ({ json: item }));"
+      },
+      "id": "f2992068-734e-447c-806a-167601b125f3",
+      "name": "Transform: Top 5 by Stars",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $input.all().map(i => i.json);\nif (!all.length || all[0].error) {\n  return [{ json: { error: all[0]?.error || 'no_items', stage: all[0]?.stage || 'select_top' } }];\n}\nconst top = all[0];\nreturn [{ json: { ...top, _allTop5: all } }];"
+      },
+      "id": "4a93f35f-d166-45d3-8f36-29d348bc34f9",
+      "name": "Select Top Repo for Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{$json.owner}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "437f6634-32af-4b86-a54d-d4c09ad5ed5a",
+      "name": "IF: Valid Repo Data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        160
+      ],
+      "notes": "Fix for Issue 3: HTTP2 must never run on an error/empty-results item, since it would build a malformed URL from a missing owner/repo. This checks that 'owner' actually exists before allowing enrichment."
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "options": {}
+      },
+      "id": "d5c4eb9c-299e-4266-93d2-f515f7da69da",
+      "name": "Discord: Send No-Data Alert",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        704,
+        288
+      ],
+      "webhookId": "cc9f0b82-41f0-404a-a94f-14a1d0887b85",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "RCupNHwYFx6qkUsA",
+          "name": "Discord Webhook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.owner}}/{{$json.repo}}/readme",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.raw"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "add1a19b-7ee5-43fa-b833-685e4adacf76",
+      "name": "HTTP2: Fetch Top Repo README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        16
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{$json.error}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "95761a3f-1830-4167-8fd9-f8aefecaabe9",
+      "name": "IF: README Fetch Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fix for Issue 1: pull the ORIGINAL repo metadata back by node reference —\n// this item never depended on HTTP2 succeeding, so it survives either branch.\nconst repo = $('Select Top Repo for Enrichment').item.json;\n\nreturn [{\n  json: {\n    ...repo,\n    readmeSnippet: '⚠️ README could not be fetched for this repo (error logged, digest still sent).',\n    fetchOk: false\n  }\n}];"
+      },
+      "id": "4e57e2b6-beb5-40f2-8e19-98902886ff27",
+      "name": "Code: Build Enriched Item (Fallback)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fix for Issue 1 (success path): same node-reference approach, so this branch\n// and the fallback branch above both emit the IDENTICAL shape with no Merge node needed —\n// this is the fix for Issue 2 (mutually exclusive branches feeding one Merge could stall).\nconst repo = $('Select Top Repo for Enrichment').item.json;\n\nconst raw = typeof $json === 'string' ? $json : ($json.data || $json.body || JSON.stringify($json));\nconst text = String(raw).replace(/\\n+/g, ' ').trim();\n\nreturn [{\n  json: {\n    ...repo,\n    readmeSnippet: text.slice(0, 300) + (text.length > 300 ? '…' : ''),\n    fetchOk: true\n  }\n}];"
+      },
+      "id": "42d6ffec-76d2-4f9f-a39c-608c33e8113e",
+      "name": "Code: Build Enriched Item (Success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{$json.stars}}",
+              "rightValue": 1000,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "12f19944-70fc-446d-bac4-1db4184475d9",
+      "name": "IF: Stars > 1000 (threshold)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "digestMessage",
+              "type": "string",
+              "value": "=🔥 **Hot Repo Alert — {{$json.name}} ({{$json.stars}}⭐)**\\n{{$json.description}}\\n\\n_README teaser:_ {{$json.readmeSnippet}}\\n{{$json.url}}\\n\\n**Also trending today (top 5):**\\n{{$json._allTop5.map(r => `• ${r.name} — ${r.stars}⭐`).join('\\n')}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a9611be6-416f-4c4e-8ad4-7f4800245919",
+      "name": "Set: Format Hot Digest",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1392,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b2",
+              "name": "digestMessage",
+              "type": "string",
+              "value": "=📋 **Morning Brief — Top repo: {{$json.name}} ({{$json.stars}}⭐)**\\n{{$json.description}}\\n\\n_README teaser:_ {{$json.readmeSnippet}}\\n{{$json.url}}\\n\\n**Also trending today (top 5):**\\n{{$json._allTop5.map(r => `• ${r.name} — ${r.stars}⭐`).join('\\n')}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6f5882cc-f630-441a-b96c-721f2e82a0e8",
+      "name": "Set: Format Normal Digest",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{$json.digestMessage}}",
+        "options": {}
+      },
+      "id": "c41c9f65-ab4d-4781-9ea5-015a0da88521",
+      "name": "Discord: Post Digest",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        -32
+      ],
+      "webhookId": "0d79fe66-9685-49ab-b13b-fa1293dd5fa4",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "RCupNHwYFx6qkUsA",
+          "name": "Discord Webhook account"
+        }
+      },
+      "notes": "Fix for Issue 5: operation is 'send' (fire-and-forget), not 'sendAndWait' (which posts buttons and pauses the workflow for a human click — wrong for an automated digest). Credential is selected via the node's credential field only; no $credentials expression is used to pull the webhook URL into an expression."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (hourly - testing)": {
+      "main": [
+        [
+          {
+            "node": "HTTP1: Fetch GitHub Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger (manual test via curl)": {
+      "main": [
+        [
+          {
+            "node": "HTTP1: Fetch GitHub Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP1: Fetch GitHub Repos": {
+      "main": [
+        [
+          {
+            "node": "Transform: Top 5 by Stars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform: Top 5 by Stars": {
+      "main": [
+        [
+          {
+            "node": "Select Top Repo for Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top Repo for Enrichment": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid Repo Data?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid Repo Data?": {
+      "main": [
+        [
+          {
+            "node": "HTTP2: Fetch Top Repo README",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord: Send No-Data Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP2: Fetch Top Repo README": {
+      "main": [
+        [
+          {
+            "node": "IF: README Fetch Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: README Fetch Failed?": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Enriched Item (Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Build Enriched Item (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Enriched Item (Fallback)": {
+      "main": [
+        [
+          {
+            "node": "IF: Stars > 1000 (threshold)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Enriched Item (Success)": {
+      "main": [
+        [
+          {
+            "node": "IF: Stars > 1000 (threshold)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Stars > 1000 (threshold)": {
+      "main": [
+        [
+          {
+            "node": "Set: Format Hot Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set: Format Normal Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Format Hot Digest": {
+      "main": [
+        [
+          {
+            "node": "Discord: Post Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Format Normal Digest": {
+      "main": [
+        [
+          {
+            "node": "Discord: Post Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "LlJMKh6Njn01ea2M",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "e88683f5-c6cf-4ec4-9521-7bd30ab6efdb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "31f2f041daec45799562cce2d9aceae6da7e392ac4c00de98a89b988556351ba"
+  },
+  "nodeGroups": [],
+  "id": "droEKjqjAtpGKC9M",
+  "tags": []
+}
